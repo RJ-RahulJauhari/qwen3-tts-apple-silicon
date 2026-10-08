@@ -83,6 +83,9 @@ def _save_audio_web(temp_folder: str, subfolder: str, text_snippet: str) -> str:
     source_file = os.path.join(temp_folder, "audio_000.wav")
     if os.path.exists(source_file):
         shutil.move(source_file, final_path)
+    else:
+        shutil.rmtree(temp_folder, ignore_errors=True)
+        raise RuntimeError(f"generate_audio produced no output at {source_file}")
     if os.path.exists(temp_folder):
         shutil.rmtree(temp_folder, ignore_errors=True)
     return os.path.join(subfolder, filename)
@@ -135,6 +138,8 @@ def _run_job(job_id: str, req: GenerateRequest):
                 f.write(base64.b64decode(req.ref_audio_b64))
             ref_audio = convert_audio_if_needed(tmp_audio)
             if not ref_audio:
+                if os.path.exists(tmp_audio):
+                    os.remove(tmp_audio)
                 raise ValueError("Could not process uploaded reference audio")
             try:
                 generate_audio(
@@ -247,6 +252,8 @@ def delete_voice(name: str):
 @app.get("/audio/{path:path}")
 def serve_audio(path: str):
     full_path = os.path.join(BASE_OUTPUT_DIR, path)
+    if not os.path.realpath(full_path).startswith(os.path.realpath(BASE_OUTPUT_DIR)):
+        raise HTTPException(status_code=400, detail="Invalid path")
     if not os.path.exists(full_path):
         raise HTTPException(status_code=404, detail="Audio not found")
     return FileResponse(full_path, media_type="audio/wav")
