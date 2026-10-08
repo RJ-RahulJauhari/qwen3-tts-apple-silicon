@@ -505,7 +505,7 @@ audio {
             <textarea id="enroll-transcript" rows="2" placeholder="The quick brown fox..."></textarea>
           </div>
           <div class="enroll-actions">
-            <button class="btn btn-primary" onclick="enrollVoice()">Save Voice</button>
+            <button class="btn btn-primary" onclick="enrollVoice(this)">Save Voice</button>
             <button class="btn btn-ghost" onclick="toggleEnrollForm()">Cancel</button>
           </div>
         </div>
@@ -574,6 +574,7 @@ async function fetchVoices() {
   const listEl = document.getElementById('voices-list');
   try {
     const res = await fetch('/voices');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     renderVoicesList(data.voices);
   } catch (e) {
@@ -609,7 +610,8 @@ function selectVoice(name) {
 async function deleteVoice(event, name) {
   event.stopPropagation();
   if (!confirm(`Remove voice "${name}"?`)) return;
-  await fetch(`/voices/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  const r = await fetch(`/voices/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!r.ok) { alert('Failed to remove voice'); return; }
   if (selectedVoice === name) selectedVoice = null;
   fetchVoices();
 }
@@ -619,7 +621,7 @@ function toggleEnrollForm() {
   form.style.display = form.style.display === 'none' ? '' : 'none';
 }
 
-async function enrollVoice() {
+async function enrollVoice(btn) {
   const name = document.getElementById('enroll-name').value.trim();
   const audioFile = document.getElementById('enroll-audio').files[0];
   const transcript = document.getElementById('enroll-transcript').value.trim();
@@ -631,7 +633,6 @@ async function enrollVoice() {
   fd.append('transcript', transcript);
   fd.append('audio', audioFile);
 
-  const btn = event.target;
   btn.disabled = true;
   btn.textContent = 'Saving…';
 
@@ -762,6 +763,13 @@ function startPolling(jobId, btn) {
   pollHandle = setInterval(async () => {
     try {
       const res = await fetch('/status/' + jobId);
+      if (!res.ok) {
+        clearInterval(pollHandle);
+        btn.disabled = false;
+        btn.textContent = 'Generate';
+        showError('Server connection lost — please retry');
+        return;
+      }
       const job = await res.json();
       if (job.status === 'done') {
         clearInterval(pollHandle);
