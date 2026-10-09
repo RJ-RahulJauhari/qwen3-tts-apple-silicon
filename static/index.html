@@ -775,16 +775,6 @@ async function _acquireStream() {
   }
 }
 
-function _startTimer(timerKey, statusEl) {
-  let secs = 0;
-  window[timerKey] = setInterval(() => {
-    secs++;
-    statusEl.innerHTML = `<span class="record-dot"></span>Recording ${_fmtTime(secs)}`;
-  }, 1000);
-  statusEl.innerHTML = `<span class="record-dot"></span>Recording 00:00`;
-  return () => secs;
-}
-
 async function toggleEnrollRecording() {
   const btn = document.getElementById('enroll-record-btn');
   const status = document.getElementById('enroll-record-status');
@@ -798,24 +788,29 @@ async function toggleEnrollRecording() {
   if (!stream) return;
 
   const chunks = [];
+  let secs = 0;
   _enrollRecorder = new MediaRecorder(stream);
   _enrollRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
-  let getSecs;
   _enrollRecorder.onstart = () => {
-    getSecs = _startTimer('_enrollTimer', status);
     btn.textContent = '⏹ Stop';
     btn.classList.add('recording');
+    status.style.color = '';
+    status.innerHTML = `<span class="record-dot"></span>Recording 00:00`;
+    _enrollTimer = setInterval(() => {
+      secs++;
+      status.innerHTML = `<span class="record-dot"></span>Recording ${_fmtTime(secs)}`;
+    }, 1000);
   };
 
   _enrollRecorder.onstop = () => {
     stream.getTracks().forEach(t => t.stop());
     clearInterval(_enrollTimer);
-    const duration = getSecs ? getSecs() : 0;
+    _enrollTimer = null;
     enrollRecordedBlob = new Blob(chunks, { type: _enrollRecorder.mimeType });
     btn.textContent = '🎤 Re-record';
     btn.classList.remove('recording');
-    status.innerHTML = `✓ Recorded ${_fmtTime(duration)} — ready`;
+    status.innerHTML = `✓ Recorded ${_fmtTime(secs)} — ready`;
     status.style.color = 'var(--success)';
   };
 
@@ -835,27 +830,31 @@ async function toggleUploadRecording() {
   if (!stream) return;
 
   const chunks = [];
+  let secs = 0;
   _uploadRecorder = new MediaRecorder(stream);
   _uploadRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
-  let getSecs;
   _uploadRecorder.onstart = () => {
-    getSecs = _startTimer('_uploadTimer', status);
     btn.textContent = '⏹ Stop';
     btn.classList.add('recording');
+    status.style.color = '';
+    status.innerHTML = `<span class="record-dot"></span>Recording 00:00`;
+    _uploadTimer = setInterval(() => {
+      secs++;
+      status.innerHTML = `<span class="record-dot"></span>Recording ${_fmtTime(secs)}`;
+    }, 1000);
   };
 
   _uploadRecorder.onstop = () => {
     stream.getTracks().forEach(t => t.stop());
     clearInterval(_uploadTimer);
-    const duration = getSecs ? getSecs() : 0;
-    const blob = new Blob(chunks, { type: _uploadRecorder.mimeType });
-    uploadedFile = blob;
+    _uploadTimer = null;
+    uploadedFile = new Blob(chunks, { type: _uploadRecorder.mimeType });
     btn.textContent = '🎤 Re-record';
     btn.classList.remove('recording');
-    status.innerHTML = `✓ Recorded ${_fmtTime(duration)}`;
+    status.innerHTML = `✓ Recorded ${_fmtTime(secs)}`;
     status.style.color = 'var(--success)';
-    document.getElementById('drop-file-name').textContent = `✓ Recorded audio (${_fmtTime(duration)})`;
+    document.getElementById('drop-file-name').textContent = `✓ Recorded audio (${_fmtTime(secs)})`;
   };
 
   _uploadRecorder.start();
