@@ -454,6 +454,11 @@ audio {
       <div class="panel-title">Custom Voice</div>
 
       <div class="form-group">
+        <label>Model</label>
+        <select id="model-custom"></select>
+      </div>
+
+      <div class="form-group">
         <label>Speaker</label>
         <select id="speaker-select">
           <optgroup label="English">
@@ -500,6 +505,11 @@ audio {
       <div class="panel-title">Voice Design</div>
 
       <div class="form-group">
+        <label>Model</label>
+        <select id="model-design"></select>
+      </div>
+
+      <div class="form-group">
         <label>Describe the voice</label>
         <textarea id="design-desc" rows="3" placeholder="e.g. A warm, friendly female voice with a slight British accent, speaking at a moderate, measured pace"></textarea>
       </div>
@@ -515,6 +525,11 @@ audio {
     <!-- Voice Cloning panel -->
     <section id="panel-clone" class="panel">
       <div class="panel-title">Voice Cloning</div>
+
+      <div class="form-group">
+        <label>Model</label>
+        <select id="model-clone"></select>
+      </div>
 
       <div class="clone-tabs">
         <button class="clone-tab active" id="ctab-saved" onclick="switchCloneTab('saved')">Saved Voices</button>
@@ -605,6 +620,36 @@ let _enrollRecorder = null;
 let _uploadRecorder = null;
 let _enrollTimer = null;
 let _uploadTimer = null;
+
+// ── Models ─────────────────────────────────────────────────────────────────
+let allModels = [];
+
+async function fetchModels() {
+  try {
+    const res = await fetch('/models');
+    const data = await res.json();
+    allModels = data.models || [];
+    populateModelSelect('model-custom', ['custom']);
+    populateModelSelect('model-design', ['design']);
+    populateModelSelect('model-clone', ['clone_saved', 'clone_upload']);
+  } catch (e) {
+    console.warn('Could not load models:', e);
+  }
+}
+
+function populateModelSelect(selectId, modes) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const compatible = allModels.filter(m => m.modes.some(mo => modes.includes(mo)));
+  sel.innerHTML = compatible.length
+    ? compatible.map(m => `<option value="${m.folder}">${m.label}</option>`).join('')
+    : '<option value="">No models found in models/</option>';
+}
+
+function getSelectedModel(selectId) {
+  const sel = document.getElementById(selectId);
+  return sel && sel.value ? sel.value : null;
+}
 
 // ── Mode switching ─────────────────────────────────────────────────────────
 function switchMode(mode) {
@@ -861,6 +906,7 @@ async function submitGenerate(mode) {
     body = {
       mode: 'custom',
       text,
+      model_folder: getSelectedModel('model-custom'),
       speaker: document.getElementById('speaker-select').value,
       emotion: document.getElementById('emotion-input').value.trim() || 'Normal tone',
       speed,
@@ -871,17 +917,18 @@ async function submitGenerate(mode) {
     const desc = document.getElementById('design-desc').value.trim();
     if (!text) { alert('Please enter text to synthesize'); return; }
     if (!desc) { alert('Please describe the voice'); return; }
-    body = { mode: 'design', text, voice_description: desc };
+    body = { mode: 'design', text, model_folder: getSelectedModel('model-design'), voice_description: desc };
 
   } else if (mode === 'clone') {
     const text = document.getElementById('clone-text').value.trim();
     if (!text) { alert('Please enter text to synthesize'); return; }
 
     const cloneInstruct = document.getElementById('clone-emotion').value.trim() || null;
+    const cloneModel = getSelectedModel('model-clone');
 
     if (currentCloneTab === 'saved') {
       if (!selectedVoice) { alert('Please select a saved voice'); return; }
-      body = { mode: 'clone_saved', text, voice_name: selectedVoice, clone_instruct: cloneInstruct };
+      body = { mode: 'clone_saved', text, model_folder: cloneModel, voice_name: selectedVoice, clone_instruct: cloneInstruct };
 
     } else {
       if (!uploadedFile) { alert('Please upload or record a reference audio file'); return; }
@@ -891,6 +938,7 @@ async function submitGenerate(mode) {
       body = {
         mode: 'clone_upload',
         text,
+        model_folder: cloneModel,
         ref_audio_b64: b64,
         ref_transcript: transcript,
         clone_instruct: cloneInstruct,
@@ -993,9 +1041,9 @@ function showError(msg) {
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
-// Reset output area to placeholder on page load
 document.getElementById('output-area').innerHTML =
   '<div class="output-placeholder">Output will appear here after generation</div>';
+fetchModels();
 </script>
 </body>
 </html>

@@ -41,13 +41,39 @@ _cached_model = None
 # One worker: TTS is memory-heavy, concurrent jobs would OOM
 executor = ThreadPoolExecutor(max_workers=1)
 
-# Map frontend mode names to MODELS keys
-_MODE_TO_KEY = {"custom": "1", "design": "2", "clone_saved": "3", "clone_upload": "3"}
+# Default folders per mode (used when no model_folder is specified)
+_MODE_DEFAULT_FOLDER = {
+    "custom": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "design": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "clone_saved": "Qwen3-TTS-12Hz-1.7B-Base",
+    "clone_upload": "Qwen3-TTS-12Hz-1.7B-Base",
+}
+
+# Infer output subfolder from model folder name
+def _output_subfolder(folder: str) -> str:
+    f = folder.lower()
+    if "customvoice" in f or "custom" in f:
+        return "CustomVoice"
+    if "voicedesign" in f or "design" in f:
+        return "VoiceDesign"
+    return "Clones"
+
+# Infer compatible mode(s) from folder name
+def _folder_modes(folder: str) -> list:
+    f = folder.lower()
+    if "customvoice" in f or "custom" in f:
+        return ["custom"]
+    if "voicedesign" in f or "design" in f:
+        return ["design"]
+    if "base" in f:
+        return ["clone_saved", "clone_upload"]
+    return ["custom", "design", "clone_saved", "clone_upload"]
 
 
 class GenerateRequest(BaseModel):
     mode: str                          # custom | design | clone_saved | clone_upload
     text: str
+    model_folder: Optional[str] = None  # override default model for the mode
     speaker: Optional[str] = "Vivian"
     emotion: Optional[str] = "Normal tone"
     speed: Optional[float] = 1.0
@@ -58,18 +84,17 @@ class GenerateRequest(BaseModel):
     clone_instruct: Optional[str] = None  # emotion/style for cloning
 
 
-def _get_model(model_key: str):
+def _get_model(folder: str):
     global _cached_key, _cached_model
-    if _cached_key == model_key and _cached_model is not None:
+    if _cached_key == folder and _cached_model is not None:
         return _cached_model
     _cached_model = None
     _cached_key = None
-    model_info = MODELS[model_key]
-    model_path = get_smart_path(model_info["folder"])
+    model_path = get_smart_path(folder)
     if not model_path:
-        raise FileNotFoundError(f"Model files not found in models/{model_info['folder']}")
+        raise FileNotFoundError(f"Model not found: models/{folder}")
     _cached_model = _load_model(model_path)
-    _cached_key = model_key
+    _cached_key = folder
     return _cached_model
 
 
@@ -95,12 +120,12 @@ def _save_audio_web(temp_folder: str, subfolder: str, text_snippet: str) -> str:
 def _run_job(job_id: str, req: GenerateRequest):
     temp_dir = None
     try:
-        model_key = _MODE_TO_KEY.get(req.mode)
-        if not model_key:
+        if req.mode not in _MODE_DEFAULT_FOLDER:
             raise ValueError(f"Unknown mode: {req.mode}")
 
-        model = _get_model(model_key)
-        model_info = MODELS[model_key]
+        folder = req.model_folder or _MODE_DEFAULT_FOLDER[req.mode]
+        model = _get_model(folder)
+        subfolder = _output_subfolder(folder)
         temp_dir = make_temp_dir()
         os.makedirs(temp_dir, exist_ok=True)
 
@@ -169,7 +194,7 @@ def _run_job(job_id: str, req: GenerateRequest):
                 if os.path.exists(tmp_audio):
                     os.remove(tmp_audio)
 
-        rel_path = _save_audio_web(temp_dir, model_info["output_subfolder"], req.text)
+        rel_path = _save_audio_web(temp_dir, subfolder, req.text)
         jobs[job_id] = {
             "status": "done",
             "audio_url": f"/audio/{rel_path}",
@@ -194,6 +219,26 @@ def serve_ui():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/models")
+def list_models():
+    if not os.path.exists(MODELS_DIR):
+        return {"models": []}
+    result = []
+    for folder in sorted(os.listdir(MODELS_DIR)):
+        if folder.startswith("."):
+            continue
+        if not os.path.isdir(os.path.join(MODELS_DIR, folder)):
+            continue
+        if get_smart_path(folder) is None:
+            continue
+        result.append({
+            "folder": folder,
+            "modes": _folder_modes(folder),
+            "label": folder.replace("-", " "),
+        })
+    return {"models": result}
 
 
 @app.post("/generate")
