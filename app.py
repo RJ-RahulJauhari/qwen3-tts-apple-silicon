@@ -55,6 +55,7 @@ class GenerateRequest(BaseModel):
     voice_name: Optional[str] = None   # clone_saved
     ref_audio_b64: Optional[str] = None  # clone_upload, base64-encoded audio bytes
     ref_transcript: Optional[str] = None
+    clone_instruct: Optional[str] = None  # emotion/style for cloning
 
 
 def _get_model(model_key: str):
@@ -132,7 +133,9 @@ def _run_job(job_id: str, req: GenerateRequest):
                 )
             generate_audio(
                 model=model, text=req.text,
-                ref_audio=voice_wav, ref_text=ref_text, output_path=temp_dir,
+                ref_audio=voice_wav, ref_text=ref_text,
+                instruct=req.clone_instruct or None,
+                output_path=temp_dir,
             )
 
         elif req.mode == "clone_upload":
@@ -157,6 +160,7 @@ def _run_job(job_id: str, req: GenerateRequest):
                     model=model, text=req.text,
                     ref_audio=ref_audio,
                     ref_text=ref_text,
+                    instruct=req.clone_instruct or None,
                     output_path=temp_dir,
                 )
             finally:

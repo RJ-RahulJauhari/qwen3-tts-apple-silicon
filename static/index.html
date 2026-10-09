@@ -572,6 +572,12 @@ audio {
       </div>
 
       <div class="form-group" style="margin-top:8px">
+        <label>Emotion / Style <span style="color:var(--text-dim)">(optional)</span></label>
+        <input type="text" id="clone-emotion" placeholder="e.g. Excited and happy, speaking fast · Sad and slow · Whispering">
+        <div class="hint-text">Leave blank for the voice's natural tone</div>
+      </div>
+
+      <div class="form-group">
         <label>Text to synthesize</label>
         <textarea id="clone-text" rows="5" placeholder="Enter the text you want to convert to speech..."></textarea>
       </div>
@@ -871,9 +877,11 @@ async function submitGenerate(mode) {
     const text = document.getElementById('clone-text').value.trim();
     if (!text) { alert('Please enter text to synthesize'); return; }
 
+    const cloneInstruct = document.getElementById('clone-emotion').value.trim() || null;
+
     if (currentCloneTab === 'saved') {
       if (!selectedVoice) { alert('Please select a saved voice'); return; }
-      body = { mode: 'clone_saved', text, voice_name: selectedVoice };
+      body = { mode: 'clone_saved', text, voice_name: selectedVoice, clone_instruct: cloneInstruct };
 
     } else {
       if (!uploadedFile) { alert('Please upload or record a reference audio file'); return; }
@@ -885,6 +893,7 @@ async function submitGenerate(mode) {
         text,
         ref_audio_b64: b64,
         ref_transcript: transcript,
+        clone_instruct: cloneInstruct,
       };
     }
   }
