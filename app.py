@@ -121,10 +121,15 @@ def _run_job(job_id: str, req: GenerateRequest):
             if not os.path.exists(voice_wav):
                 raise FileNotFoundError(f"Saved voice '{req.voice_name}' not found")
             txt_path = os.path.join(VOICES_DIR, f"{req.voice_name}.txt")
-            ref_text = None
+            ref_text = ""
             if os.path.exists(txt_path):
                 with open(txt_path, "r") as f:
                     ref_text = f.read().strip()
+            if not ref_text:
+                raise ValueError(
+                    f"No transcript found for voice '{req.voice_name}'. "
+                    "Re-enroll the voice and provide a transcript."
+                )
             generate_audio(
                 model=model, text=req.text,
                 ref_audio=voice_wav, ref_text=ref_text, output_path=temp_dir,
@@ -133,6 +138,12 @@ def _run_job(job_id: str, req: GenerateRequest):
         elif req.mode == "clone_upload":
             if not req.ref_audio_b64:
                 raise ValueError("ref_audio_b64 is required for clone_upload mode")
+            ref_text = (req.ref_transcript or "").strip()
+            if not ref_text:
+                raise ValueError(
+                    "Transcript is required for voice cloning. "
+                    "Type exactly what is said in the reference audio."
+                )
             tmp_audio = f"/tmp/qwen3_ref_{job_id}.bin"
             with open(tmp_audio, "wb") as f:
                 f.write(base64.b64decode(req.ref_audio_b64))
@@ -145,7 +156,7 @@ def _run_job(job_id: str, req: GenerateRequest):
                 generate_audio(
                     model=model, text=req.text,
                     ref_audio=ref_audio,
-                    ref_text=req.ref_transcript or ".",
+                    ref_text=ref_text,
                     output_path=temp_dir,
                 )
             finally:

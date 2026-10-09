@@ -541,8 +541,8 @@ audio {
             <div class="record-status" id="enroll-record-status"></div>
           </div>
           <div class="form-group">
-            <label>Transcript <span style="color:var(--text-dim)">(type exactly what the audio says)</span></label>
-            <textarea id="enroll-transcript" rows="2" placeholder="The quick brown fox..."></textarea>
+            <label>Transcript <span style="color:var(--error)">*</span> <span style="color:var(--text-dim)">(type exactly what the audio says)</span></label>
+            <textarea id="enroll-transcript" rows="2" placeholder="Type exactly what is said in the recording..."></textarea>
           </div>
           <div class="enroll-actions">
             <button class="btn btn-primary" onclick="enrollVoice(this)">Save Voice</button>
@@ -566,8 +566,8 @@ audio {
           <div class="record-status" id="upload-record-status" style="margin-top:0"></div>
         </div>
         <div class="form-group">
-          <label>Transcript <span style="color:var(--text-dim)">(optional but improves quality)</span></label>
-          <textarea id="upload-transcript" rows="2" placeholder="What the reference audio says..."></textarea>
+          <label>Transcript <span style="color:var(--error)">*</span> <span style="color:var(--text-dim)">(type exactly what the audio says)</span></label>
+          <textarea id="upload-transcript" rows="2" placeholder="Type exactly what is said in the recording..."></textarea>
         </div>
       </div>
 
@@ -678,6 +678,7 @@ async function enrollVoice(btn) {
   const transcript = document.getElementById('enroll-transcript').value.trim();
   if (!name) { alert('Voice name is required'); return; }
   if (!audioSource) { alert('Record or upload reference audio first'); return; }
+  if (!transcript) { alert('Transcript is required — type exactly what is said in the recording'); return; }
 
   const fd = new FormData();
   fd.append('name', name);
@@ -875,13 +876,15 @@ async function submitGenerate(mode) {
       body = { mode: 'clone_saved', text, voice_name: selectedVoice };
 
     } else {
-      if (!uploadedFile) { alert('Please upload a reference audio file'); return; }
+      if (!uploadedFile) { alert('Please upload or record a reference audio file'); return; }
+      const transcript = document.getElementById('upload-transcript').value.trim();
+      if (!transcript) { alert('Transcript is required — type exactly what is said in the reference audio'); return; }
       const b64 = await fileToBase64(uploadedFile);
       body = {
         mode: 'clone_upload',
         text,
         ref_audio_b64: b64,
-        ref_transcript: document.getElementById('upload-transcript').value.trim() || '.',
+        ref_transcript: transcript,
       };
     }
   }
