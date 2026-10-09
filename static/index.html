@@ -290,6 +290,42 @@ input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
 
 .enroll-actions { display: flex; gap: 8px; }
 
+/* ── Recording ── */
+.record-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.record-btn:hover { color: var(--text); border-color: var(--text-muted); }
+.record-btn.recording { color: var(--error); border-color: var(--error); background: rgba(239,68,68,0.08); }
+
+.record-status {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  min-height: 18px;
+}
+
+.record-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--error);
+  margin-right: 4px;
+  animation: blink 1s ease-in-out infinite;
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.2; } }
+
 /* ── Drop zone ── */
 .drop-zone {
   border: 2px dashed var(--border);
@@ -497,8 +533,12 @@ audio {
             <input type="text" id="enroll-name" placeholder="e.g. Boss, Mom, Client">
           </div>
           <div class="form-group">
-            <label>Reference audio file</label>
-            <input type="file" id="enroll-audio" accept="audio/*" style="padding:6px">
+            <label>Reference audio</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="file" id="enroll-audio" accept="audio/*" style="flex:1;padding:6px" onchange="onEnrollFileSelected(this)">
+              <button type="button" class="record-btn" id="enroll-record-btn" onclick="toggleEnrollRecording()">🎤 Record</button>
+            </div>
+            <div class="record-status" id="enroll-record-status"></div>
           </div>
           <div class="form-group">
             <label>Transcript <span style="color:var(--text-dim)">(type exactly what the audio says)</span></label>
@@ -519,6 +559,11 @@ audio {
           <div style="color:var(--text-dim);margin-top:4px;font-size:12px">or click to browse (WAV, MP3, M4A…)</div>
           <input type="file" id="upload-audio" accept="audio/*" onchange="onFileSelected(this)">
           <div class="drop-file-name" id="drop-file-name"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <span style="color:var(--text-dim);font-size:12px">— or —</span>
+          <button type="button" class="record-btn" id="upload-record-btn" onclick="toggleUploadRecording()">🎤 Record from mic</button>
+          <div class="record-status" id="upload-record-status" style="margin-top:0"></div>
         </div>
         <div class="form-group">
           <label>Transcript <span style="color:var(--text-dim)">(optional but improves quality)</span></label>
@@ -549,6 +594,11 @@ let currentCloneTab = 'saved';
 let selectedVoice = null;
 let uploadedFile = null;
 let pollHandle = null;
+let enrollRecordedBlob = null;
+let _enrollRecorder = null;
+let _uploadRecorder = null;
+let _enrollTimer = null;
+let _uploadTimer = null;
 
 // ── Mode switching ─────────────────────────────────────────────────────────
 function switchMode(mode) {
@@ -624,14 +674,15 @@ function toggleEnrollForm() {
 async function enrollVoice(btn) {
   const name = document.getElementById('enroll-name').value.trim();
   const audioFile = document.getElementById('enroll-audio').files[0];
+  const audioSource = audioFile || enrollRecordedBlob;
   const transcript = document.getElementById('enroll-transcript').value.trim();
   if (!name) { alert('Voice name is required'); return; }
-  if (!audioFile) { alert('Reference audio file is required'); return; }
+  if (!audioSource) { alert('Record or upload reference audio first'); return; }
 
   const fd = new FormData();
   fd.append('name', name);
   fd.append('transcript', transcript);
-  fd.append('audio', audioFile);
+  fd.append('audio', audioSource, audioFile ? audioFile.name : 'recording.webm');
 
   btn.disabled = true;
   btn.textContent = 'Saving…';
@@ -645,6 +696,9 @@ async function enrollVoice(btn) {
     document.getElementById('enroll-name').value = '';
     document.getElementById('enroll-audio').value = '';
     document.getElementById('enroll-transcript').value = '';
+    enrollRecordedBlob = null;
+    document.getElementById('enroll-record-status').innerHTML = '';
+    document.getElementById('enroll-record-btn').textContent = '🎤 Record';
     toggleEnrollForm();
     fetchVoices();
   } catch (e) {
@@ -652,6 +706,115 @@ async function enrollVoice(btn) {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Save Voice';
+  }
+}
+
+// ── Recording ──────────────────────────────────────────────────────────────
+function _fmtTime(s) {
+  return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+}
+
+async function _acquireStream() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    alert('Microphone access denied. Allow microphone access in your browser and try again.');
+    return null;
+  }
+}
+
+function _startTimer(timerKey, statusEl) {
+  let secs = 0;
+  window[timerKey] = setInterval(() => {
+    secs++;
+    statusEl.innerHTML = `<span class="record-dot"></span>Recording ${_fmtTime(secs)}`;
+  }, 1000);
+  statusEl.innerHTML = `<span class="record-dot"></span>Recording 00:00`;
+  return () => secs;
+}
+
+async function toggleEnrollRecording() {
+  const btn = document.getElementById('enroll-record-btn');
+  const status = document.getElementById('enroll-record-status');
+
+  if (_enrollRecorder && _enrollRecorder.state === 'recording') {
+    _enrollRecorder.stop();
+    return;
+  }
+
+  const stream = await _acquireStream();
+  if (!stream) return;
+
+  const chunks = [];
+  _enrollRecorder = new MediaRecorder(stream);
+  _enrollRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+  let getSecs;
+  _enrollRecorder.onstart = () => {
+    getSecs = _startTimer('_enrollTimer', status);
+    btn.textContent = '⏹ Stop';
+    btn.classList.add('recording');
+  };
+
+  _enrollRecorder.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    clearInterval(_enrollTimer);
+    const duration = getSecs ? getSecs() : 0;
+    enrollRecordedBlob = new Blob(chunks, { type: _enrollRecorder.mimeType });
+    btn.textContent = '🎤 Re-record';
+    btn.classList.remove('recording');
+    status.innerHTML = `✓ Recorded ${_fmtTime(duration)} — ready`;
+    status.style.color = 'var(--success)';
+  };
+
+  _enrollRecorder.start();
+}
+
+async function toggleUploadRecording() {
+  const btn = document.getElementById('upload-record-btn');
+  const status = document.getElementById('upload-record-status');
+
+  if (_uploadRecorder && _uploadRecorder.state === 'recording') {
+    _uploadRecorder.stop();
+    return;
+  }
+
+  const stream = await _acquireStream();
+  if (!stream) return;
+
+  const chunks = [];
+  _uploadRecorder = new MediaRecorder(stream);
+  _uploadRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+  let getSecs;
+  _uploadRecorder.onstart = () => {
+    getSecs = _startTimer('_uploadTimer', status);
+    btn.textContent = '⏹ Stop';
+    btn.classList.add('recording');
+  };
+
+  _uploadRecorder.onstop = () => {
+    stream.getTracks().forEach(t => t.stop());
+    clearInterval(_uploadTimer);
+    const duration = getSecs ? getSecs() : 0;
+    const blob = new Blob(chunks, { type: _uploadRecorder.mimeType });
+    uploadedFile = blob;
+    btn.textContent = '🎤 Re-record';
+    btn.classList.remove('recording');
+    status.innerHTML = `✓ Recorded ${_fmtTime(duration)}`;
+    status.style.color = 'var(--success)';
+    document.getElementById('drop-file-name').textContent = `✓ Recorded audio (${_fmtTime(duration)})`;
+  };
+
+  _uploadRecorder.start();
+}
+
+function onEnrollFileSelected(input) {
+  if (input.files[0]) {
+    enrollRecordedBlob = null;
+    document.getElementById('enroll-record-status').innerHTML = '';
+    document.getElementById('enroll-record-btn').textContent = '🎤 Record';
+    document.getElementById('enroll-record-btn').classList.remove('recording');
   }
 }
 
